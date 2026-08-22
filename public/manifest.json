@@ -1,0 +1,9 @@
+{
+  "name": "Ridgeline Duo",
+  "short_name": "Ridgeline",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#161C24",
+  "theme_color": "#161C24",
+  "icons": []
+}
