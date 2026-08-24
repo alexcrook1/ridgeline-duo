@@ -56,7 +56,10 @@ async function askClaude({ text, images = [], system, jsonOnly = false }) {
     body: JSON.stringify({ text, images, system, jsonOnly }),
   });
   const data = await resp.json();
-  if (data.error) throw new Error(typeof data.error === "string" ? data.error : "AI request failed");
+  if (data.error) {
+    const msg = typeof data.error === "string" ? data.error : JSON.stringify(data.error);
+    throw new Error(msg);
+  }
   return data.result;
 }
 
@@ -653,7 +656,8 @@ function ScaleFlow({ me, onClose }) {
       });
       setResult(data);
     } catch (e) {
-      setError("Couldn't read that clearly — try a straighter, well-lit photo of the display.");
+      console.error("Scale analyze failed:", e);
+      setError(`Something went wrong: ${e.message || "unknown error"}`);
     }
     setBusy(false);
   };
@@ -695,22 +699,28 @@ function FoodFlow({ me, onClose }) {
   const [clarify, setClarify] = useState(null);
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
 
   const analyze = async (image, extraAnswer) => {
-    setBusy(true);
-    const data = await askClaude({
-      images: image ? [image] : [],
-      system: "You are a careful nutrition estimator. Look at the food/drink photo (if given) and description. If you genuinely cannot tell portion size, cooking method, or a key ingredient that would change the calorie count a lot, ask ONE short clarifying question instead of guessing. Otherwise, estimate calories and macros. Respond with ONLY JSON: either {\"needsClarification\": \"question text\"} or {\"description\": \"short label\", \"calories\": number, \"protein\": number, \"carbs\": number, \"fat\": number}.",
-      text: `Description from user: "${desc || "(none given)"}"${extraAnswer ? `\nClarifying answer: "${extraAnswer}"` : ""}\nEstimate the calories.`,
-      jsonOnly: true,
-    });
-    setBusy(false);
-    if (data.needsClarification) {
-      setClarify(data.needsClarification);
-    } else {
-      setResult(data);
-      setClarify(null);
+    setBusy(true); setError(null);
+    try {
+      const data = await askClaude({
+        images: image ? [image] : [],
+        system: "You are a careful nutrition estimator. Look at the food/drink photo (if given) and description. If you genuinely cannot tell portion size, cooking method, or a key ingredient that would change the calorie count a lot, ask ONE short clarifying question instead of guessing. Otherwise, estimate calories and macros. Respond with ONLY JSON: either {\"needsClarification\": \"question text\"} or {\"description\": \"short label\", \"calories\": number, \"protein\": number, \"carbs\": number, \"fat\": number}.",
+        text: `Description from user: "${desc || "(none given)"}"${extraAnswer ? `\nClarifying answer: "${extraAnswer}"` : ""}\nEstimate the calories.`,
+        jsonOnly: true,
+      });
+      if (data.needsClarification) {
+        setClarify(data.needsClarification);
+      } else {
+        setResult(data);
+        setClarify(null);
+      }
+    } catch (e) {
+      console.error("Food analyze failed:", e);
+      setError(`Something went wrong: ${e.message || "unknown error"}`);
     }
+    setBusy(false);
   };
 
   const save = async () => {
@@ -745,6 +755,7 @@ function FoodFlow({ me, onClose }) {
               </Btn>
             </div>
           )}
+          {error && <div style={{ color: COLORS.coral, marginTop: 10, fontSize: 13 }}>{error}</div>}
         </>
       )}
       {result && (
@@ -770,16 +781,22 @@ function BodyFlow({ me, onClose }) {
   const [img, setImg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
 
   const analyze = async (image) => {
-    setImg(image); setBusy(true);
-    const data = await askClaude({
-      images: [image],
-      system: "You are a supportive, practical personal trainer reviewing a weekly progress photo. Be encouraging and specific, never body-shaming or clinical. Suggest 2-4 concrete, actionable focus areas (e.g. specific exercise types, posture, consistency habits) based only on what's visibly reasonable to comment on from a fitness-progress standpoint. Respond with ONLY JSON: {\"summary\": \"one encouraging sentence\", \"actions\": [\"action 1\", \"action 2\", ...]}.",
-      text: "Give this week's observations and action items.",
-      jsonOnly: true,
-    });
-    setResult(data);
+    setImg(image); setBusy(true); setError(null);
+    try {
+      const data = await askClaude({
+        images: [image],
+        system: "You are a supportive, practical personal trainer reviewing a weekly progress photo. Be encouraging and specific, never body-shaming or clinical. Suggest 2-4 concrete, actionable focus areas (e.g. specific exercise types, posture, consistency habits) based only on what's visibly reasonable to comment on from a fitness-progress standpoint. Respond with ONLY JSON: {\"summary\": \"one encouraging sentence\", \"actions\": [\"action 1\", \"action 2\", ...]}.",
+        text: "Give this week's observations and action items.",
+        jsonOnly: true,
+      });
+      setResult(data);
+    } catch (e) {
+      console.error("Body check analyze failed:", e);
+      setError(`Something went wrong: ${e.message || "unknown error"}`);
+    }
     setBusy(false);
   };
 
@@ -792,6 +809,7 @@ function BodyFlow({ me, onClose }) {
     <FlowShell title="Weekly body check" onClose={onClose}>
       {!result && !img && <CaptureButton label="Take weekly photo" onImage={analyze} />}
       {busy && <div style={{ marginTop: 12, color: COLORS.textDim }}><Loader2 className="spin" size={16} style={{ verticalAlign: -3 }} /> Reviewing…</div>}
+      {error && <div style={{ color: COLORS.coral, marginTop: 10, fontSize: 13 }}>{error}</div>}
       {result && (
         <div>
           <div style={{ fontSize: 14, marginBottom: 10 }}>{result.summary}</div>
