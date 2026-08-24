@@ -173,29 +173,43 @@ function RidgeSVG({ people }) {
   );
 }
 
-// ---------- Camera capture control ----------
+// ---------- Camera capture control (take photo OR upload from gallery) ----------
 function CaptureButton({ label, onImage, icon: Icon = Camera }) {
-  const ref = useRef();
+  const camRef = useRef();
+  const fileRef = useRef();
+
+  const handleFile = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const data = await fileToBase64(f);
+    onImage({ data, type: f.type || "image/jpeg" });
+    e.target.value = "";
+  };
+
   return (
-    <>
+    <div style={{ display: "flex", gap: 10 }}>
       <input
-        ref={ref}
+        ref={camRef}
         type="file"
         accept="image/*"
         capture="environment"
         style={{ display: "none" }}
-        onChange={async (e) => {
-          const f = e.target.files?.[0];
-          if (!f) return;
-          const data = await fileToBase64(f);
-          onImage({ data, type: f.type || "image/jpeg" });
-          e.target.value = "";
-        }}
+        onChange={handleFile}
       />
-      <Btn onClick={() => ref.current.click()} full>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={handleFile}
+      />
+      <Btn onClick={() => camRef.current.click()} style={{ flex: 1 }}>
         <Icon size={18} /> {label}
       </Btn>
-    </>
+      <Btn variant="ghost" onClick={() => fileRef.current.click()} style={{ flex: 1 }}>
+        <ImagePlus size={18} /> Upload
+      </Btn>
+    </div>
   );
 }
 
