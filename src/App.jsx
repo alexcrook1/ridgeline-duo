@@ -894,23 +894,30 @@ function GoalTab({ me }) {
     sSet(`fasting:${me}`, next);
   };
 
+  const [error, setError] = useState(null);
+
   const calcPlan = async () => {
-    setBusy(true);
-    const latestWeighKeys = await sList(`weighins:${me}:`);
-    let currentWeight = goal.startWeight;
-    if (latestWeighKeys.length) {
-      const latest = await sGet(latestWeighKeys.sort().at(-1));
-      currentWeight = latest?.weight ?? currentWeight;
+    setBusy(true); setError(null);
+    try {
+      const latestWeighKeys = await sList(`weighins:${me}:`);
+      let currentWeight = goal.startWeight;
+      if (latestWeighKeys.length) {
+        const latest = await sGet(latestWeighKeys.sort().at(-1));
+        currentWeight = latest?.weight ?? currentWeight;
+      }
+      const plan = await askClaude({
+        system: "You are a sensible, safety-conscious nutrition coach. Never recommend under 1200 kcal/day for women or 1500 for men, and never more than ~1% bodyweight loss per week. Respond with ONLY JSON: {\"dailyCalorieTarget\": number, \"weeklyRateKg\": number, \"proteinTargetG\": number, \"notes\": \"1-2 short sentences of practical advice, mentioning their fasting schedule if relevant\"}.",
+        text: `Person: ${profile.sex}, ${profile.age}y, ${profile.heightCm}cm, activity level ${profile.activity}. Current weight: ${currentWeight}kg. Target weight: ${goal.targetWeight}kg by ${goal.targetDate}. Fasting schedule: ${fasting.enabled ? `${fasting.days.join(", ")} eating window ${fasting.windowStart}-${fasting.windowEnd}` : "none"}. Work out a realistic daily calorie target and weekly rate to hit the goal safely by the date, adjusting the timeline in your notes if the date is unrealistic.`,
+        jsonOnly: true,
+      });
+      const nextGoal = { ...goal, startWeight: goal.startWeight ?? currentWeight, plan };
+      setGoal(nextGoal);
+      await sSet(`goal:${me}`, nextGoal);
+      await sSet(`profile:${me}`, profile);
+    } catch (e) {
+      console.error("calcPlan failed:", e);
+      setError(`Couldn't work out a plan: ${e.message || "unknown error"}`);
     }
-    const plan = await askClaude({
-      system: "You are a sensible, safety-conscious nutrition coach. Never recommend under 1200 kcal/day for women or 1500 for men, and never more than ~1% bodyweight loss per week. Respond with ONLY JSON: {\"dailyCalorieTarget\": number, \"weeklyRateKg\": number, \"proteinTargetG\": number, \"notes\": \"1-2 short sentences of practical advice, mentioning their fasting schedule if relevant\"}.",
-      text: `Person: ${profile.sex}, ${profile.age}y, ${profile.heightCm}cm, activity level ${profile.activity}. Current weight: ${currentWeight}kg. Target weight: ${goal.targetWeight}kg by ${goal.targetDate}. Fasting schedule: ${fasting.enabled ? `${fasting.days.join(", ")} eating window ${fasting.windowStart}-${fasting.windowEnd}` : "none"}. Work out a realistic daily calorie target and weekly rate to hit the goal safely by the date, adjusting the timeline in your notes if the date is unrealistic.`,
-      jsonOnly: true,
-    });
-    const nextGoal = { ...goal, startWeight: goal.startWeight ?? currentWeight, plan };
-    setGoal(nextGoal);
-    await sSet(`goal:${me}`, nextGoal);
-    await sSet(`profile:${me}`, profile);
     setBusy(false);
   };
 
@@ -988,6 +995,7 @@ function GoalTab({ me }) {
       <Btn full onClick={calcPlan} disabled={!goal.targetWeight || !goal.targetDate || busy}>
         {busy ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />} Work out my plan
       </Btn>
+      {error && <div style={{ color: COLORS.coral, fontSize: 13 }}>{error}</div>}
 
       {goal.plan && (
         <Card style={{ borderColor: COLORS.gold }}>
@@ -1067,10 +1075,34 @@ function CompeteTab({ me, partner }) {
   useEffect(() => {
     (async () => {
       const people = partner ? [me, partner] : [me];
-      const days = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(); d.setDate(d.getDate() - (6 - i));
+
+      // Find the earliest date either of you has logged anything, so the
+      // chart starts from when you actually began rather than padding out
+      // empty days before you existed in the app.
+      let earliest = todayISO();
+      for (const p of people) {
+        const [wKeys, aKeys] = await Promise.all([
+          sList(`weighins:${p}:`),
+          sList(`activity:${p}:`),
+        ]);
+        [...wKeys, ...aKeys].forEach((k) => {
+          const datePart = k.split(":").pop();
+          if (datePart && datePart < earliest) earliest = datePart;
+        });
+      }
+      const sevenAgo = (() => {
+        const d = new Date(); d.setDate(d.getDate() - 6);
         return d.toISOString().slice(0, 10);
-      });
+      })();
+      const startDate = earliest > sevenAgo ? earliest : sevenAgo; // cap window at 7 days max
+      const days = [];
+      let cursor = new Date(startDate + "T00:00:00");
+      const end = new Date(todayISO() + "T00:00:00");
+      while (cursor <= end) {
+        days.push(cursor.toISOString().slice(0, 10));
+        cursor.setDate(cursor.getDate() + 1);
+      }
+
       const weightRows = [];
       const stepRows = [];
       const streaks = {};
