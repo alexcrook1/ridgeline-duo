@@ -547,10 +547,17 @@ function TodayTab({ me, partner }) {
       <Card>
         <SectionTitle icon={Scale}>Today's weigh-in</SectionTitle>
         {weighIn ? (
-          <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
-            <Stat label="Weight" value={`${weighIn.weight} kg`} />
-            {weighIn.bodyFatPct != null && <Stat label="Body fat" value={`${weighIn.bodyFatPct}%`} />}
-            {weighIn.musclePct != null && <Stat label="Muscle" value={`${weighIn.musclePct}%`} />}
+          <div>
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+              <Stat label="Weight" value={`${weighIn.weight} kg`} />
+              {weighIn.bodyFatPct != null && <Stat label="Body fat" value={`${weighIn.bodyFatPct}%`} />}
+              {weighIn.musclePct != null && <Stat label="Muscle" value={`${weighIn.musclePct}%`} />}
+            </div>
+            {weighIn.insight && (
+              <div style={{ background: COLORS.bgRaised, borderRadius: 10, padding: 12, marginTop: 12, fontSize: 13.5, color: COLORS.goldSoft, lineHeight: 1.5 }}>
+                <Sparkles size={14} style={{ verticalAlign: -2, marginRight: 4 }} />{weighIn.insight}
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ color: COLORS.textDim, fontSize: 14 }}>
@@ -685,11 +692,48 @@ function FlowShell({ title, onClose, children }) {
   );
 }
 
+// Looks at recent weigh-ins alongside recent food logs and returns a short,
+// specific insight if (and only if) there's something genuinely worth saying.
+async function generateWeighInsight(me) {
+  const weighKeys = (await sList(`weighins:${me}:`)).sort().reverse().slice(0, 8);
+  const weighins = await Promise.all(
+    weighKeys.map(async (k) => ({ date: k.split(":").pop(), ...(await sGet(k)) }))
+  );
+  const days = Array.from({ length: 4 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    return d.toISOString().slice(0, 10);
+  });
+  const foodByDay = {};
+  for (const d of days) {
+    const items = await sGet(`food:${me}:${d}`);
+    if (items?.length) foodByDay[d] = items.map((f) => `${f.description} (${f.calories}kcal)`).join(", ");
+  }
+  const weighSummary = [...weighins].reverse()
+    .map((w) => `${w.date}: weight ${w.weight}kg${w.bodyFatPct != null ? `, body fat ${w.bodyFatPct}%` : ""}${w.musclePct != null ? `, muscle ${w.musclePct}%` : ""}${w.waterPct != null ? `, water ${w.waterPct}%` : ""}`)
+    .join("\n");
+  const foodSummary = Object.entries(foodByDay).map(([d, items]) => `${d}: ${items}`).join("\n") || "No food logged recently.";
+
+  try {
+    const result = await askClaude({
+      system: "You are a sharp, practical health analyst reviewing one person's recent weigh-in history alongside their recent food log. Look for a genuinely specific, useful pattern worth flagging — e.g. a body metric moving against what the food log would suggest, a food or drink that plausibly explains a stall or change, or a trend worth reinforcing. Only comment if there are at least 3 weigh-ins of history AND something specific and non-obvious to say — do not force a comment or restate the obvious. Never invent a food connection that isn't actually supported by the log. If there's nothing meaningful yet, respond with {\"comment\": null}. Respond with ONLY JSON: {\"comment\": \"one or two short practical sentences, or null\"}.",
+      text: `Weigh-in history (oldest to newest):\n${weighSummary}\n\nRecent food log:\n${foodSummary}`,
+      jsonOnly: true,
+    });
+    return result?.comment || null;
+  } catch (e) {
+    console.error("generateWeighInsight failed:", e);
+    return null;
+  }
+}
+
 function ScaleFlow({ me, onClose }) {
   const [img, setImg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const [savingInsight, setSavingInsight] = useState(false);
+  const [insight, setInsight] = useState(null);
 
   const analyze = async (image) => {
     setImg(image); setBusy(true); setError(null);
@@ -715,7 +759,14 @@ function ScaleFlow({ me, onClose }) {
     if (goal && goal.startWeight == null) {
       await sSet(`goal:${me}`, { ...goal, startWeight: result.weight });
     }
-    onClose();
+    setSaved(true);
+    setSavingInsight(true);
+    const comment = await generateWeighInsight(me);
+    setInsight(comment);
+    if (comment) {
+      await sSet(`weighins:${me}:${todayISO()}`, { ...result, insight: comment });
+    }
+    setSavingInsight(false);
   };
 
   return (
@@ -723,7 +774,7 @@ function ScaleFlow({ me, onClose }) {
       {!img && <CaptureButton label="Take photo of scale" onImage={analyze} />}
       {busy && <div style={{ marginTop: 12, color: COLORS.textDim }}><Loader2 className="spin" size={16} style={{ verticalAlign: -3 }} /> Reading display…</div>}
       {error && <div style={{ color: COLORS.coral, marginTop: 10, fontSize: 13 }}>{error}</div>}
-      {result && (
+      {result && !saved && (
         <div style={{ marginTop: 14 }}>
           {Object.entries(result).map(([k, v]) => (
             <Field key={k} label={k}>
@@ -732,6 +783,24 @@ function ScaleFlow({ me, onClose }) {
             </Field>
           ))}
           <Btn full onClick={save}><Check size={16} /> Save reading</Btn>
+        </div>
+      )}
+      {saved && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ color: COLORS.teal, fontSize: 14, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+            <Check size={16} /> Reading saved
+          </div>
+          {savingInsight && (
+            <div style={{ color: COLORS.textDim, fontSize: 13, marginBottom: 12 }}>
+              <Loader2 className="spin" size={14} style={{ verticalAlign: -2 }} /> Checking your trend…
+            </div>
+          )}
+          {!savingInsight && insight && (
+            <div style={{ background: COLORS.bgRaised, borderRadius: 10, padding: 12, marginBottom: 14, fontSize: 13.5, color: COLORS.goldSoft, lineHeight: 1.5 }}>
+              <Sparkles size={14} style={{ verticalAlign: -2, marginRight: 4 }} />{insight}
+            </div>
+          )}
+          <Btn full onClick={onClose}><ArrowRight size={16} /> Done</Btn>
         </div>
       )}
     </FlowShell>
