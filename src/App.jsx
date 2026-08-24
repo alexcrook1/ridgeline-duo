@@ -513,7 +513,8 @@ function TodayTab({ me, partner }) {
   const myBmr = profile && weighIn ? bmr({ ...profile, weightKg: weighIn.weight }) : null;
   const burnFromActivity = (Number(activity.exerciseMinutes) || 0) * 7; // rough kcal/min estimate
   const caloriesOut = myBmr ? Math.round(myBmr * (ACTIVITY_MULT[profile?.activity] || 1.4)) + burnFromActivity : null;
-  const calorieTarget = goal?.plan?.dailyCalorieTarget || null;
+  const baseTarget = goal?.plan?.dailyCalorieTarget || null;
+  const calorieTarget = baseTarget ? baseTarget + burnFromActivity : null; // give back what you burn today
   const compareTo = calorieTarget || caloriesOut; // prefer the AI-set target once it exists
   const ratio = compareTo ? Math.min(1.6, caloriesIn / compareTo) : null;
   const remaining = calorieTarget ? calorieTarget - caloriesIn : null;
@@ -579,6 +580,11 @@ function TodayTab({ me, partner }) {
             <Stat label="Out (est.)" value={caloriesOut ? `${caloriesOut} kcal` : "—"} color={COLORS.teal} />
           )}
         </div>
+        {calorieTarget && burnFromActivity > 0 && (
+          <div style={{ fontSize: 11.5, color: COLORS.textDim, marginTop: -4, marginBottom: 10 }}>
+            {baseTarget} base + {burnFromActivity} from today's activity
+          </div>
+        )}
         {ratio != null && (
           <div style={{ background: COLORS.bgRaised, borderRadius: 8, height: 10, overflow: "hidden" }}>
             <div style={{
