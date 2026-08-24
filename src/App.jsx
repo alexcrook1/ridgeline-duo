@@ -834,7 +834,7 @@ function BodyFlow({ me, onClose }) {
     try {
       const data = await askClaude({
         images: [image],
-        system: "You are a supportive, practical personal trainer reviewing a weekly progress photo. Be encouraging and specific, never body-shaming or clinical. Suggest 2-4 concrete, actionable focus areas (e.g. specific exercise types, posture, consistency habits) based only on what's visibly reasonable to comment on from a fitness-progress standpoint. Respond with ONLY JSON: {\"summary\": \"one encouraging sentence\", \"actions\": [\"action 1\", \"action 2\", ...]}.",
+        system: "You are a supportive, practical personal trainer reviewing a weekly progress photo. Be encouraging and specific, never body-shaming or clinical. Write a short conclusion paragraph (3-4 sentences) summarising what you observe about progress, posture, and overall build in a constructive way, as if wrapping up a check-in. Then suggest 2-4 concrete, actionable focus areas (e.g. specific exercise types, posture cues, consistency habits) based only on what's visibly reasonable to comment on from a fitness-progress standpoint. Respond with ONLY JSON: {\"summary\": \"one encouraging headline sentence\", \"conclusion\": \"the 3-4 sentence conclusion paragraph\", \"actions\": [\"action 1\", \"action 2\", ...]}.",
         text: "Give this week's observations and action items.",
         jsonOnly: true,
       });
@@ -858,7 +858,15 @@ function BodyFlow({ me, onClose }) {
       {error && <div style={{ color: COLORS.coral, marginTop: 10, fontSize: 13 }}>{error}</div>}
       {result && (
         <div>
-          <div style={{ fontSize: 14, marginBottom: 10 }}>{result.summary}</div>
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>{result.summary}</div>
+          {result.conclusion && (
+            <div style={{ fontSize: 13.5, color: COLORS.textDim, marginBottom: 14, lineHeight: 1.5 }}>
+              {result.conclusion}
+            </div>
+          )}
+          <div style={{ fontSize: 12, color: COLORS.gold, fontWeight: 600, marginBottom: 6, letterSpacing: 0.3 }}>
+            FOCUS THIS WEEK
+          </div>
           <ul style={{ paddingLeft: 18, marginBottom: 14 }}>
             {result.actions?.map((a, i) => <li key={i} style={{ marginBottom: 6, fontSize: 13 }}>{a}</li>)}
           </ul>
@@ -1049,7 +1057,12 @@ function ProgressTab({ me, partner }) {
       {checks.map((c, i) => (
         <Card key={i}>
           <div style={{ fontSize: 12, color: COLORS.textDim, marginBottom: 6 }}>{c.date ? fmtDate(c.date) : "This week"}</div>
-          <div style={{ fontSize: 14, marginBottom: 8 }}>{c.summary}</div>
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{c.summary}</div>
+          {c.conclusion && (
+            <div style={{ fontSize: 13, color: COLORS.textDim, marginBottom: 10, lineHeight: 1.5 }}>
+              {c.conclusion}
+            </div>
+          )}
           <ul style={{ paddingLeft: 18, margin: 0 }}>
             {c.actions?.map((a, j) => <li key={j} style={{ fontSize: 13, marginBottom: 4 }}>{a}</li>)}
           </ul>
