@@ -49,13 +49,52 @@ function fileToBase64(file) {
   });
 }
 
+// Resize + recompress a photo client-side so it comfortably fits under
+// Vercel's ~4.5MB request body limit (phone camera photos are often 5-15MB raw).
+function resizeImage(file, maxDim = 1280, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      const dataUrl = canvas.toDataURL("image/jpeg", quality);
+      resolve({ data: dataUrl.split(",")[1], type: "image/jpeg" });
+    };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(new Error("image load failed")); };
+    img.src = url;
+  });
+}
+
 async function askClaude({ text, images = [], system, jsonOnly = false }) {
   const resp = await fetch("/api/claude", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, images, system, jsonOnly }),
   });
-  const data = await resp.json();
+  let data;
+  try {
+    data = await resp.json();
+  } catch {
+    if (resp.status === 413) {
+      throw new Error("That photo was too large to send — try again, it should auto-resize now.");
+    }
+    throw new Error(`Server error (${resp.status} ${resp.statusText || ""})`.trim());
+  }
   if (data.error) {
     const msg = typeof data.error === "string" ? data.error : JSON.stringify(data.error);
     throw new Error(msg);
@@ -184,8 +223,15 @@ function CaptureButton({ label, onImage, icon: Icon = Camera }) {
   const handleFile = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    const data = await fileToBase64(f);
-    onImage({ data, type: f.type || "image/jpeg" });
+    try {
+      const img = await resizeImage(f);
+      onImage(img);
+    } catch (err) {
+      console.error("Image resize failed:", err);
+      // fall back to sending the original if resizing fails for some reason
+      const data = await fileToBase64(f);
+      onImage({ data, type: f.type || "image/jpeg" });
+    }
     e.target.value = "";
   };
 
