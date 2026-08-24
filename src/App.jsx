@@ -513,7 +513,10 @@ function TodayTab({ me, partner }) {
   const myBmr = profile && weighIn ? bmr({ ...profile, weightKg: weighIn.weight }) : null;
   const burnFromActivity = (Number(activity.exerciseMinutes) || 0) * 7; // rough kcal/min estimate
   const caloriesOut = myBmr ? Math.round(myBmr * (ACTIVITY_MULT[profile?.activity] || 1.4)) + burnFromActivity : null;
-  const ratio = caloriesOut ? Math.min(1.6, caloriesIn / caloriesOut) : null;
+  const calorieTarget = goal?.plan?.dailyCalorieTarget || null;
+  const compareTo = calorieTarget || caloriesOut; // prefer the AI-set target once it exists
+  const ratio = compareTo ? Math.min(1.6, caloriesIn / compareTo) : null;
+  const remaining = calorieTarget ? calorieTarget - caloriesIn : null;
 
   const saveActivity = async (patch) => {
     const next = { ...activity, ...patch };
@@ -567,10 +570,14 @@ function TodayTab({ me, partner }) {
       </Card>
 
       <Card>
-        <SectionTitle icon={Flame}>Calories in vs out</SectionTitle>
-        <div style={{ display: "flex", gap: 18, marginBottom: 10 }}>
+        <SectionTitle icon={Flame}>Calories in vs {calorieTarget ? "target" : "out"}</SectionTitle>
+        <div style={{ display: "flex", gap: 18, marginBottom: 10, flexWrap: "wrap" }}>
           <Stat label="In" value={`${caloriesIn} kcal`} color={COLORS.gold} />
-          <Stat label="Out (est.)" value={caloriesOut ? `${caloriesOut} kcal` : "—"} color={COLORS.teal} />
+          {calorieTarget ? (
+            <Stat label="Target" value={`${calorieTarget} kcal`} color={COLORS.teal} />
+          ) : (
+            <Stat label="Out (est.)" value={caloriesOut ? `${caloriesOut} kcal` : "—"} color={COLORS.teal} />
+          )}
         </div>
         {ratio != null && (
           <div style={{ background: COLORS.bgRaised, borderRadius: 8, height: 10, overflow: "hidden" }}>
@@ -580,9 +587,19 @@ function TodayTab({ me, partner }) {
             }} />
           </div>
         )}
-        {!myBmr && (
+        {remaining != null && (
+          <div style={{ fontSize: 12.5, color: remaining >= 0 ? COLORS.textDim : COLORS.coral, marginTop: 8 }}>
+            {remaining >= 0 ? `${remaining} kcal remaining today` : `${Math.abs(remaining)} kcal over target`}
+          </div>
+        )}
+        {!calorieTarget && !myBmr && (
           <div style={{ fontSize: 12, color: COLORS.textDim, marginTop: 8 }}>
             <Info size={12} style={{ verticalAlign: -2 }} /> Log today's weigh-in and complete your profile to see an accurate burn estimate.
+          </div>
+        )}
+        {!calorieTarget && myBmr && (
+          <div style={{ fontSize: 12, color: COLORS.textDim, marginTop: 8 }}>
+            <Info size={12} style={{ verticalAlign: -2 }} /> Set a goal on the Goal tab for a proper daily target instead of this rough estimate.
           </div>
         )}
         {foods.length > 0 && (
