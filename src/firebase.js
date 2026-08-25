@@ -63,3 +63,6 @@ export function getWhoAmI() {
 export function setWhoAmI(name) {
   localStorage.setItem("ridgeline_whoami", name);
 }
+export function clearWhoAmI() {
+  localStorage.removeItem("ridgeline_whoami");
+}

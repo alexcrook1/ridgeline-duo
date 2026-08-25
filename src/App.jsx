@@ -2,13 +2,13 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Camera, Target, TrendingUp, Trophy, Home, Flame, Footprints,
   Scale, UtensilsCrossed, ChevronRight, Check, X, Loader2, Mountain,
-  Clock, Sparkles, ImagePlus, ArrowRight, Info
+  Clock, Sparkles, ImagePlus, ArrowRight, Info, UserCog
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend
 } from "recharts";
-import { dGet, dSet, dListPrefix, getWhoAmI, setWhoAmI } from "./firebase.js";
+import { dGet, dSet, dListPrefix, getWhoAmI, setWhoAmI, clearWhoAmI } from "./firebase.js";
 
 // ---------- palette / tokens ----------
 const COLORS = {
@@ -433,9 +433,21 @@ export default function App() {
       <header style={{ padding: "18px 18px 8px", display: "flex", alignItems: "center", gap: 10 }}>
         <Mountain size={22} color={COLORS.gold} />
         <div style={{ fontFamily: "Fraunces, serif", fontSize: 19, fontWeight: 600 }}>Ridgeline</div>
-        <div style={{ marginLeft: "auto", fontSize: 12, color: COLORS.textDim }}>
+        <button
+          onClick={() => {
+            if (window.confirm(`Not ${me}? This will sign out of this device and let you pick again.`)) {
+              clearWhoAmI();
+              setMe(null);
+            }
+          }}
+          style={{
+            marginLeft: "auto", fontSize: 12, color: COLORS.textDim, background: "none",
+            border: "none", cursor: "pointer", padding: "6px 4px", display: "flex", alignItems: "center", gap: 4,
+          }}
+        >
           {me}{partner ? ` & ${partner}` : ""}
-        </div>
+          <UserCog size={13} />
+        </button>
       </header>
 
       <main style={{ padding: "6px 16px 16px", maxWidth: 480, margin: "0 auto" }}>
