@@ -26,13 +26,21 @@ const COLORS = {
   personB: "#5B9C8C",
 };
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+// Local-timezone date string (YYYY-MM-DD). Deliberately NOT toISOString(),
+// which is UTC and can silently shift "today" by a day depending on time of day.
+const localISO = (d = new Date()) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+const todayISO = () => localISO(new Date());
 const weekOf = (d = new Date()) => {
   const dt = new Date(d);
   const day = dt.getDay();
   const diff = dt.getDate() - day; // start Sunday
-  const sunday = new Date(dt.setDate(diff));
-  return sunday.toISOString().slice(0, 10);
+  dt.setDate(diff);
+  return localISO(dt);
 };
 const fmtDate = (iso) =>
   new Date(iso + "T00:00:00").toLocaleDateString(undefined, {
@@ -181,36 +189,70 @@ const inputStyle = {
 
 // ---------- Ridgeline signature visualization ----------
 function RidgeSVG({ people }) {
-  // people: [{name, color, pct}] pct 0-100 progress toward goal
-  const w = 340, h = 140;
-  const path = `M0,${h - 20} L40,${h - 60} L80,${h - 35} L130,${h - 90} L180,${h - 45} L230,${h - 100} L280,${h - 55} L${w},${h - 85}`;
+  // people: [{name, color, pct}] pct 0-100 progress toward each person's own goal.
+  // Single shared summit — each person climbs their own face of the same mountain,
+  // so equal % progress lines them up level with each other: a proper race.
+  const w = 340, h = 170;
+  const apex = { x: w / 2, y: 22 };
+  const baseLeft = { x: 18, y: h - 14 };
+  const baseRight = { x: w - 18, y: h - 14 };
+  const pointOnFace = (side, pct) => {
+    const base = side === "left" ? baseLeft : baseRight;
+    const t = Math.max(0.03, Math.min(0.97, pct / 100));
+    return { x: base.x + (apex.x - base.x) * t, y: base.y + (apex.y - base.y) * t };
+  };
+
   return (
     <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h}>
       <defs>
-        <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#2A3646" />
-          <stop offset="100%" stopColor="#161C24" />
+        <linearGradient id="skyBright" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#4A5D80" />
+          <stop offset="55%" stopColor="#2E3B54" />
+          <stop offset="100%" stopColor="#181F2E" />
+        </linearGradient>
+        <radialGradient id="sunGlow" cx="50%" cy="35%" r="60%">
+          <stop offset="0%" stopColor="#FFEEC2" stopOpacity="0.95" />
+          <stop offset="100%" stopColor="#FFEEC2" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id="mountainBright" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#5C6E8C" />
+          <stop offset="100%" stopColor="#26314A" />
         </linearGradient>
       </defs>
-      <rect x="0" y="0" width={w} height={h} fill="url(#sky)" rx="12" />
-      <path d={path} fill="none" stroke={COLORS.line} strokeWidth="3" strokeLinecap="round" />
+
+      <rect width={w} height={h} rx="14" fill="url(#skyBright)" />
+      <circle cx={apex.x} cy={apex.y + 10} r="60" fill="url(#sunGlow)" />
+
+      {/* single mountain, both faces */}
+      <polygon
+        points={`${baseLeft.x},${baseLeft.y} ${apex.x},${apex.y} ${baseRight.x},${baseRight.y}`}
+        fill="url(#mountainBright)" stroke="#12182A" strokeWidth="1.5"
+      />
+      {/* snow cap */}
+      <polygon
+        points={`${apex.x - 20},${apex.y + 26} ${apex.x},${apex.y} ${apex.x + 20},${apex.y + 26} ${apex.x + 9},${apex.y + 18} ${apex.x},${apex.y + 27} ${apex.x - 9},${apex.y + 18}`}
+        fill="#F8F5EC" opacity="0.95"
+      />
+      {/* summit flag */}
+      <line x1={apex.x} y1={apex.y} x2={apex.x} y2={apex.y - 18} stroke={COLORS.gold} strokeWidth="2" />
+      <path d={`M${apex.x},${apex.y - 18} l13,4.5 l-13,4.5 Z`} fill={COLORS.goldSoft} />
+
       {people.map((p, i) => {
-        const clamped = Math.max(2, Math.min(98, p.pct));
-        const x = (clamped / 100) * w;
-        // approximate y along the jagged path by simple interpolation
-        const y = h - 30 - (clamped / 100) * 55 - (i % 2 === 0 ? 6 : -6);
+        const side = i % 2 === 0 ? "left" : "right";
+        const pos = pointOnFace(side, p.pct);
         return (
-          <g key={p.name} transform={`translate(${x},${y})`}>
+          <g key={p.name} transform={`translate(${pos.x},${pos.y})`}>
             <circle r="9" fill={p.color} stroke="#0B0F14" strokeWidth="2" />
-            <text y="-14" textAnchor="middle" fontSize="11" fill={p.color} fontWeight="700">
-              {p.name}
+            <circle r="9" fill="none" stroke={p.color} strokeWidth="1.5" opacity="0.5">
+              <animate attributeName="r" values="9;13;9" dur="2.2s" repeatCount="indefinite" />
+              <animate attributeName="opacity" values="0.5;0;0.5" dur="2.2s" repeatCount="indefinite" />
+            </circle>
+            <text y="-15" textAnchor="middle" fontSize="11" fill={p.color} fontWeight="700">
+              {p.name} · {Math.round(p.pct)}%
             </text>
           </g>
         );
       })}
-      <g transform={`translate(${w - 14},${h - 92})`}>
-        <path d="M0,0 L6,10 L-6,10 Z" fill={COLORS.gold} />
-      </g>
     </svg>
   );
 }
@@ -736,7 +778,7 @@ async function generateWeighInsight(me) {
   );
   const days = Array.from({ length: 4 }, (_, i) => {
     const d = new Date(); d.setDate(d.getDate() - i);
-    return d.toISOString().slice(0, 10);
+    return localISO(d);
   });
   const foodByDay = {};
   for (const d of days) {
@@ -1209,15 +1251,20 @@ function CompeteTab({ me, partner }) {
       }
       const sevenAgo = (() => {
         const d = new Date(); d.setDate(d.getDate() - 6);
-        return d.toISOString().slice(0, 10);
+        return localISO(d);
       })();
       const startDate = earliest > sevenAgo ? earliest : sevenAgo; // cap window at 7 days max
       const days = [];
       let cursor = new Date(startDate + "T00:00:00");
       const end = new Date(todayISO() + "T00:00:00");
       while (cursor <= end) {
-        days.push(cursor.toISOString().slice(0, 10));
+        days.push(localISO(cursor));
         cursor.setDate(cursor.getDate() + 1);
+      }
+
+      const goals = {};
+      for (const p of people) {
+        goals[p] = await sGet(`goal:${p}`);
       }
 
       const weightRows = [];
@@ -1229,7 +1276,7 @@ function CompeteTab({ me, partner }) {
         for (const p of people) {
           const w = await sGet(`weighins:${p}:${day}`);
           const a = await sGet(`activity:${p}:${day}`);
-          row[p] = w?.weight ?? null;
+          row[p] = (w?.weight != null && goals[p]) ? Math.round(progressPct(goals[p], w.weight)) : null;
           srow[p] = a?.steps ? Number(a.steps) : null;
         }
         weightRows.push(row);
@@ -1243,7 +1290,7 @@ function CompeteTab({ me, partner }) {
         }
         streaks[p] = streak;
       }
-      setData({ weight: weightRows, steps: stepRows, streaks, people });
+      setData({ weight: weightRows, steps: stepRows, streaks, people, hasGoals: people.some((p) => goals[p]) });
       setLoading(false);
     })();
   }, [me, partner]);
@@ -1275,18 +1322,27 @@ function CompeteTab({ me, partner }) {
       </div>
 
       <Card>
-        <SectionTitle icon={TrendingUp}>Weight trend (7 days)</SectionTitle>
-        <ResponsiveContainer width="100%" height={180}>
-          <LineChart data={data.weight}>
-            <CartesianGrid stroke={COLORS.line} strokeDasharray="3 3" />
-            <XAxis dataKey="date" stroke={COLORS.textDim} fontSize={11} />
-            <YAxis stroke={COLORS.textDim} fontSize={11} domain={["auto", "auto"]} />
-            <Tooltip contentStyle={{ background: COLORS.bgRaised, border: `1px solid ${COLORS.line}` }} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Line type="monotone" dataKey={me} stroke={COLORS.personA} strokeWidth={2} connectNulls dot={{ r: 3 }} />
-            {partner && <Line type="monotone" dataKey={partner} stroke={COLORS.personB} strokeWidth={2} connectNulls dot={{ r: 3 }} />}
-          </LineChart>
-        </ResponsiveContainer>
+        <SectionTitle icon={TrendingUp}>Journey to goal weight</SectionTitle>
+        {data.hasGoals ? (
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={data.weight}>
+              <CartesianGrid stroke={COLORS.line} strokeDasharray="3 3" />
+              <XAxis dataKey="date" stroke={COLORS.textDim} fontSize={11} />
+              <YAxis stroke={COLORS.textDim} fontSize={11} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+              <Tooltip
+                contentStyle={{ background: COLORS.bgRaised, border: `1px solid ${COLORS.line}` }}
+                formatter={(v) => [`${v}%`, "of the way there"]}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Line type="monotone" dataKey={me} stroke={COLORS.personA} strokeWidth={2} connectNulls dot={{ r: 3 }} />
+              {partner && <Line type="monotone" dataKey={partner} stroke={COLORS.personB} strokeWidth={2} connectNulls dot={{ r: 3 }} />}
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div style={{ color: COLORS.textDim, fontSize: 13.5 }}>
+            Set a goal weight on the Goal tab to see your % progress here instead of raw kg.
+          </div>
+        )}
       </Card>
 
       <Card>
