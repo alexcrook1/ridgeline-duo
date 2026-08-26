@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Camera, Target, TrendingUp, Trophy, Home, Flame, Footprints,
   Scale, UtensilsCrossed, ChevronRight, Check, X, Loader2, Mountain,
-  Clock, Sparkles, ImagePlus, ArrowRight, Info, UserCog
+  Clock, Sparkles, ImagePlus, ArrowRight, Info, UserCog, Plus
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -439,6 +439,28 @@ function bmr({ heightCm, age, sex, weightKg }) {
   return sex === "male" ? base + 5 : base - 161;
 }
 
+// MET (Metabolic Equivalent of Task) values for common exercise types.
+// kcal burned = MET × 3.5 × weight(kg) / 200 × minutes — standard ACSM formula.
+const ACTIVITY_TYPES = [
+  { key: "walking", label: "Walking", met: 3.5 },
+  { key: "hiking", label: "Hiking / mountain trail", met: 6.0 },
+  { key: "running", label: "Running", met: 9.8 },
+  { key: "trail_running", label: "Trail / hill running", met: 11.0 },
+  { key: "cycling", label: "Cycling", met: 7.5 },
+  { key: "swimming", label: "Swimming", met: 8.0 },
+  { key: "weights", label: "Weight training", met: 5.0 },
+  { key: "hiit", label: "HIIT / circuits", met: 8.5 },
+  { key: "yoga", label: "Yoga / stretching", met: 3.0 },
+  { key: "rowing", label: "Rowing", met: 7.0 },
+  { key: "football", label: "Football / team sport", met: 7.5 },
+  { key: "other", label: "Other", met: 4.5 },
+];
+function estimateActivityCalories(typeKey, minutes, weightKg) {
+  const type = ACTIVITY_TYPES.find((t) => t.key === typeKey) || ACTIVITY_TYPES.at(-1);
+  const w = weightKg || 75; // sensible fallback if no weigh-in logged yet
+  return Math.round((type.met * 3.5 * w) / 200 * minutes);
+}
+
 // ================= APP SHELL =================
 export default function App() {
   const [me, setMe] = useState(null);
@@ -532,7 +554,9 @@ function TodayTab({ me, partner }) {
   const [goal, setGoal] = useState(null);
   const [partnerGoal, setPartnerGoal] = useState(null);
   const [foods, setFoods] = useState([]);
-  const [activity, setActivity] = useState({ steps: "", exerciseMinutes: "", exerciseType: "", loggedComplete: false });
+  const [activity, setActivity] = useState({ steps: "", activities: [], loggedComplete: false });
+  const [newActivityType, setNewActivityType] = useState(ACTIVITY_TYPES[0].key);
+  const [newActivityMins, setNewActivityMins] = useState("");
   const [profile, setProfile] = useState(null);
   const [partnerLatestWeight, setPartnerLatestWeight] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -548,7 +572,7 @@ function TodayTab({ me, partner }) {
       sGet(`profile:${me}`),
     ]);
     setWeighIn(w); setGoal(g); setPartnerGoal(pg); setFoods(f || []);
-    setActivity(a || { steps: "", exerciseMinutes: "", exerciseType: "", loggedComplete: false });
+    setActivity(a || { steps: "", activities: [], loggedComplete: false });
     setProfile(p);
     if (partner) {
       const keys = await sList(`weighins:${partner}:`);
@@ -565,7 +589,7 @@ function TodayTab({ me, partner }) {
 
   const caloriesIn = foods.reduce((s, f) => s + (Number(f.calories) || 0), 0);
   const myBmr = profile && weighIn ? bmr({ ...profile, weightKg: weighIn.weight }) : null;
-  const burnFromActivity = (Number(activity.exerciseMinutes) || 0) * 7; // rough kcal/min estimate
+  const burnFromActivity = (activity.activities || []).reduce((s, a) => s + (a.calories || 0), 0);
   const caloriesOut = myBmr ? Math.round(myBmr * (ACTIVITY_MULT[profile?.activity] || 1.4)) + burnFromActivity : null;
   const baseTarget = goal?.plan?.dailyCalorieTarget || null;
   const calorieTarget = baseTarget ? baseTarget + burnFromActivity : null; // give back what you burn today
@@ -575,6 +599,23 @@ function TodayTab({ me, partner }) {
 
   const saveActivity = async (patch) => {
     const next = { ...activity, ...patch };
+    setActivity(next);
+    await sSet(`activity:${me}:${todayISO()}`, next);
+  };
+
+  const addActivity = async () => {
+    const mins = Number(newActivityMins);
+    if (!mins || mins <= 0) return;
+    const calories = estimateActivityCalories(newActivityType, mins, weighIn?.weight);
+    const entry = { id: uid(), type: newActivityType, minutes: mins, calories };
+    const next = { ...activity, activities: [...(activity.activities || []), entry] };
+    setActivity(next);
+    await sSet(`activity:${me}:${todayISO()}`, next);
+    setNewActivityMins("");
+  };
+
+  const removeActivity = async (id) => {
+    const next = { ...activity, activities: (activity.activities || []).filter((a) => a.id !== id) };
     setActivity(next);
     await sSet(`activity:${me}:${todayISO()}`, next);
   };
@@ -671,16 +712,56 @@ function TodayTab({ me, partner }) {
 
       <Card>
         <SectionTitle icon={Footprints}>Steps & activity</SectionTitle>
-        <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+        <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
           <input style={inputStyle} type="number" placeholder="Steps today" value={activity.steps}
             onChange={(e) => saveActivity({ steps: e.target.value })} />
         </div>
+
+        {(activity.activities || []).length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            {activity.activities.map((a) => {
+              const label = ACTIVITY_TYPES.find((t) => t.key === a.type)?.label || a.type;
+              return (
+                <div key={a.id} style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "8px 0",
+                  borderBottom: `1px solid ${COLORS.line}`,
+                }}>
+                  <div style={{ flex: 1, fontSize: 13.5 }}>{label}</div>
+                  <div style={{ fontSize: 12.5, color: COLORS.textDim }}>{a.minutes} min</div>
+                  <div style={{ fontSize: 13, color: COLORS.teal, fontWeight: 600, minWidth: 60, textAlign: "right" }}>
+                    {a.calories} kcal
+                  </div>
+                  <button onClick={() => removeActivity(a.id)} style={{
+                    background: "none", border: "none", color: COLORS.textDim, cursor: "pointer", padding: 4,
+                  }}>
+                    <X size={14} />
+                  </button>
+                </div>
+              );
+            })}
+            <div style={{ fontSize: 12.5, color: COLORS.textDim, marginTop: 8 }}>
+              {burnFromActivity} kcal burned from activity today
+            </div>
+          </div>
+        )}
+
         <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-          <input style={inputStyle} type="number" placeholder="Exercise mins" value={activity.exerciseMinutes}
-            onChange={(e) => saveActivity({ exerciseMinutes: e.target.value })} />
-          <input style={inputStyle} placeholder="What did you do?" value={activity.exerciseType}
-            onChange={(e) => saveActivity({ exerciseType: e.target.value })} />
+          <select style={{ ...inputStyle, flex: 1.3 }} value={newActivityType}
+            onChange={(e) => setNewActivityType(e.target.value)}>
+            {ACTIVITY_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          </select>
+          <input style={{ ...inputStyle, flex: 1 }} type="number" placeholder="Mins" value={newActivityMins}
+            onChange={(e) => setNewActivityMins(e.target.value)} />
+          <Btn variant="ghost" onClick={addActivity} disabled={!newActivityMins}>
+            <Plus size={16} />
+          </Btn>
         </div>
+        {!weighIn && (
+          <div style={{ fontSize: 11.5, color: COLORS.textDim, marginTop: -6, marginBottom: 10 }}>
+            <Info size={11} style={{ verticalAlign: -1 }} /> Using an estimated weight until today's scale reading is logged.
+          </div>
+        )}
+
         {activity.loggedComplete ? (
           <div style={{ color: COLORS.teal, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
             <Check size={16} /> Logged for today {activity.completedOnTime === false ? "(after 9pm — sneaky)" : ""}
